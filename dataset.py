@@ -8,11 +8,11 @@ import torch
 
 
 
-
 class GlaucomaDataset(Dataset):
-    def __init__(self, path, df, transform=None, mode='binary', limit=0):
+    def __init__(self, path, df, additionalFeatures = {},transform=None, mode='binary', limit=0):
         self.path = path
         self.df = df
+        self.d = additionalFeatures
         if limit:
             self.imagePaths = [os.path.join(path, file) for file in os.listdir(path)][:limit]
         else:
@@ -50,13 +50,19 @@ class GlaucomaDataset(Dataset):
 
         if self.mode == 'binary':
             label = torch.tensor((dfEntry['Final Label'] == 'RG').to_numpy(dtype=np.float64))
+            return image,label
         else:
             # Consistently load multi-class labels in the defined order
             label = torch.tensor(
                 [dfEntry[col].values[0] for col in self.multi_class_columns],
                 dtype=torch.int8
             )
-        return image, label
+            if filename in self.d:
+                additionalFeatures = torch.tensor(self.d[filename])
+            else:
+                additionalFeatures = torch.tensor((0,0,0,0,0))
+            return image,label,additionalFeatures
+
 
     def getWeights(self):
         # Calculate the sum of each column (count of positive instances)

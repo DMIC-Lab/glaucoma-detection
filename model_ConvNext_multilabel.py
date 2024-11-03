@@ -14,7 +14,7 @@ import copy
 import wandb
 import torchmetrics
 from torchmetrics.classification import MultilabelHammingDistance, MultilabelAUROC, MultilabelSensitivityAtSpecificity
-
+import pickle
 # %%
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -29,7 +29,7 @@ set_seed(42)
 # %%
 num_epochs = 30
 batch_size = 64
-learning_rate = 1e-4
+learning_rate = 1e-3
 num_labels = 10
 
 # %%
@@ -39,23 +39,45 @@ wandb.init(project='glaucoma-multilabel', config={
     'batch_size': batch_size,
 })
 
-# %%
-def get_pretrained_convnext():
-    model = models.convnext.convnext_base(weights=models.ConvNeXt_Base_Weights.IMAGENET1K_V1)
-    # Modify the classifier for binary classification
-    model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_labels)  # 10 features classification output
+class ConvNeXtWithAdditionalFeatures(nn.Module):
+    def __init__(self, num_additional_features):
+        super(ConvNeXtWithAdditionalFeatures, self).__init__()
+        # Load the pre-trained ConvNeXt model
+        self.convnext = models.convnext.convnext_base(weights=models.ConvNeXt_Base_Weights.IMAGENET1K_V1)
+        # Replace the last classification layer with an identity layer to extract features
+        num_features = self.convnext.classifier[2].in_features
+        self.convnext.classifier[2] = nn.Identity()
+        # Define a new classifier that takes concatenated features
+        self.classifier = nn.Linear(num_features + num_additional_features, 10)  # Multilabel classification
+
+    def forward(self, x, additional_features):
+        # Pass input through ConvNeXt
+        x = self.convnext(x)
+        # Ensure additional_features has the correct shape
+        if len(additional_features.shape) == 1:
+            additional_features = additional_features.unsqueeze(1)
+        # Concatenate ConvNeXt features with additional features
+        x = torch.cat((x, additional_features), dim=1)
+        # Pass concatenated features through the classifier
+        x = self.classifier(x)
+        #x = torch.sigmoid(x)
+        return x
+
+# Example usage:
+def get_pretrained_convnext_with_additional_features(num_additional_features):
+    model = ConvNeXtWithAdditionalFeatures(num_additional_features)
     return model
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = get_pretrained_convnext().to(device)
+model = get_pretrained_convnext_with_additional_features(5).to(device)
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
 # %%
-summary(model, input_size=(3, 512, 512))
+#summary(model, input_size=(3, 512, 512))
 
 # %%
-print(model)
+#print(model)
 
 # %%
 path =  "./preprocessed"
@@ -69,7 +91,7 @@ transform = transforms.Compose([
 
 # %%
 # Create datasets and dataloaders
-dataset = GlaucomaDataset(path, df, transform, mode='multi')
+dataset = GlaucomaDataset(path, df, additionalFeatures=pickle.load(open('./cup.pkl','rb')),transform=transform, mode='multi')
 print(len(dataset))
 # Calculate the sizes for each split
 total_size = len(dataset)
@@ -99,11 +121,11 @@ for epoch in range(num_epochs):
     running_loss = 0.0
     correct_predictions = 0
     total_predictions = 0
-    for i,(images, labels) in enumerate(train_loader):
-        images, labels = images.to(device), labels.float().to(device)
+    for i,(images, labels, additionalFeatures) in enumerate(train_loader):
+        images, labels, additionalFeatures = images.to(device), labels.float().to(device), additionalFeatures.to(device)
 
         optimizer.zero_grad()
-        outputs = model(images)
+        outputs = model(images,additionalFeatures)
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -134,10 +156,10 @@ for epoch in range(num_epochs):
     all_outputs = []
     all_labels =[]
     with torch.no_grad():
-        for images, labels in val_loader:
-            images, labels = images.to(device), labels.float().to(device)
+        for images, labels,additionalFeatures in val_loader:
+            images, labels,additionalFeatures = images.to(device), labels.float().to(device), additionalFeatures.to(device)
             all_labels.append(labels)
-            outputs = model(images)
+            outputs = model(images,additionalFeatures)
             all_outputs.append(outputs)
             loss = criterion(outputs, labels)
             val_running_loss += loss.item() * images.size(0)
