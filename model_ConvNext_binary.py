@@ -47,6 +47,8 @@ def get_pretrained_convnext():
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = get_pretrained_convnext().to(device)
+model.load_state_dict(torch.load('./outputs/best_model_binary.pth',weights_only=True))
+model = torch.compile(model)
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
 # %%
@@ -89,12 +91,12 @@ test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False,num_workers=
 best_val_loss = float('inf')
 best_model_wts = copy.deepcopy(model.state_dict())
 # Initialize metrics
-train_auroc = BinaryAUROC().to(device)
-train_recall = BinaryRecall().to(device)
-train_specificity = BinarySpecificity().to(device)
-val_auroc = BinaryAUROC().to(device)
-val_recall = BinaryRecall().to(device)
-val_specificity = BinarySpecificity().to(device)
+train_AUROC = BinaryAUROC().to(device)
+train_Recall = BinaryRecall().to(device)
+train_Specificity = BinarySpecificity().to(device)
+val_AUROC = BinaryAUROC().to(device)
+val_Recall = BinaryRecall().to(device)
+val_Specificity = BinarySpecificity().to(device)
 
 # %%
 # Training and validation loop
@@ -135,9 +137,9 @@ for epoch in range(num_epochs):
     all_labels = torch.cat(all_labels)
         # Compute training metrics
     epoch_accuracy = correct_predictions / total_predictions
-    train_auroc = train_auroc(all_outputs, all_labels)
-    train_recall = train_recall(all_outputs, all_labels)
-    train_specificity = train_specificity(all_outputs, all_labels)
+    train_auroc = train_AUROC(all_outputs, all_labels)
+    train_recall = train_Recall(all_outputs, all_labels)
+    train_specificity = train_Specificity(all_outputs, all_labels)
     wandb.log({
         'epoch': epoch + 1,
         'train_loss': epoch_loss,
@@ -169,9 +171,9 @@ for epoch in range(num_epochs):
     val_accuracy = val_correct_predictions / val_total_predictions
     val_all_outputs = torch.cat(val_all_outputs)
     val_all_labels = torch.cat(val_all_labels)
-    val_auroc = val_auroc(val_all_outputs, val_all_labels)
-    val_recall = val_recall(val_all_outputs, val_all_labels)
-    val_specificity = val_specificity(val_all_outputs, val_all_labels)
+    val_auroc = val_AUROC(val_all_outputs, val_all_labels)
+    val_recall = val_Recall(val_all_outputs, val_all_labels)
+    val_specificity = val_Specificity(val_all_outputs, val_all_labels)
     # Log validation metrics
     wandb.log({
         'epoch': epoch + 1,
